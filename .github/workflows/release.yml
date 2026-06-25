@@ -1,0 +1,73 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools (linux)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y musl-tools
+
+      - uses: RustSec/audit-check@v1.4.3
+        continue-on-error: true
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/tabbit-bridge dist/
+          tar -czf tabbit-bridge-${{ matrix.target }}.tar.gz -C dist tabbit-bridge
+          shasum -a 256 tabbit-bridge-${{ matrix.target }}.tar.gz > tabbit-bridge-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Package (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          mkdir dist
+          cp target/${{ matrix.target }}/release/tabbit-bridge.exe dist/
+          Compress-Archive -Path dist/tabbit-bridge.exe -DestinationPath tabbit-bridge-${{ matrix.target }}.zip
+          $hash = (Get-FileHash tabbit-bridge-${{ matrix.target }}.zip -Algorithm SHA256).Hash
+          "$hash  tabbit-bridge-${{ matrix.target }}.zip" | Out-File -Encoding ascii tabbit-bridge-${{ matrix.target }}.zip.sha256
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            tabbit-bridge-${{ matrix.target }}.*
+            scripts/install.sh
+            scripts/install.ps1
