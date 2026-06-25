@@ -15,6 +15,8 @@ pub struct Config {
     pub server: ServerCfg,
     #[serde(default)]
     pub limits: LimitsCfg,
+    #[serde(default)]
+    pub update: UpdateCfg,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +54,27 @@ impl Default for LimitsCfg {
             rate_per_min: default_rate(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateCfg {
+    #[serde(default = "default_check_on_start")]
+    pub check_on_start: bool,
+    #[serde(default)]
+    pub auto_install: bool,
+    #[serde(default = "default_channel")]
+    pub channel: String,
+    #[serde(default)]
+    pub last_check_ts: i64,
+    #[serde(default)]
+    pub last_known_version: String,
+}
+
+fn default_check_on_start() -> bool {
+    true
+}
+fn default_channel() -> String {
+    "stable".to_string()
 }
 
 /// 返回当前平台的配置目录（不创建）。
@@ -173,6 +196,7 @@ pub fn load_or_init() -> std::io::Result<(Config, PathBuf)> {
             token: random_hex(TOKEN_BYTES),
         },
         limits: LimitsCfg::default(),
+        update: UpdateCfg::default(),
     };
     let text = toml::to_string(&cfg).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("序列化配置失败: {}", e))
@@ -205,6 +229,34 @@ pub fn load_or_init() -> std::io::Result<(Config, PathBuf)> {
         }
         Err(e) => Err(e),
     }
+}
+
+/// 把后台检查到的最新版本号写回 config.toml 的 [update] 段。
+/// 失败静默（不影响主服务）。时间戳用系统 epoch 秒。
+pub fn record_latest(version: &str) -> std::io::Result<()> {
+    let dir = config_dir().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "无法确定配置目录")
+    })?;
+    let path = dir.join("config.toml");
+    let text = fs::read_to_string(&path)?;
+    let mut cfg: Config = toml::from_str(&text).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("config.toml 解析失败: {}", e))
+    })?;
+    cfg.update.last_known_version = version.to_string();
+    cfg.update.last_check_ts = now_epoch_secs();
+    let new_text = toml::to_string(&cfg).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("序列化配置失败: {}", e))
+    })?;
+    // 已有文件，普通覆写即可（自举竞争已由 create_new 解决）
+    fs::write(&path, new_text)?;
+    Ok(())
+}
+
+fn now_epoch_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

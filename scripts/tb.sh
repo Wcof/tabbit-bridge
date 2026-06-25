@@ -3,7 +3,7 @@
 # 用法: curl -fsSL https://your.host/tb.sh | sh
 set -eu
 
-REPO="${REPO:-tabbit/tabbit-bridge}"
+REPO="${REPO:-Wcof/tabbit-bridge}"
 VERSION="${VERSION:-latest}"
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN_DIR="$PREFIX/bin"
@@ -11,6 +11,17 @@ BIN_DIR="$PREFIX/bin"
 C_GREEN='\033[32m'; C_YELLOW='\033[33m'; C_RED='\033[31m'; C_CYAN='\033[36m'; C_END='\033[0m'
 info() { printf "${C_GREEN}[install]${C_END} %s\n" "$*"; }
 err()  { printf "${C_RED}[install]${C_END} %s\n" "$*" >&2; }
+
+# 解析最新稳定版（GitHub API）
+resolve_stable_version() {
+    if [ -n "${VERSION:-}" ] && [ "$VERSION" != "latest" ]; then
+        echo "$VERSION"; return
+    fi
+    curl -fsSL -H "Accept: application/vnd.github+json" \
+        --max-time 10 \
+        "https://api.github.com/repos/$REPO/releases/latest" \
+        | awk -F'"' '/"tag_name"/ {print $4; exit}'
+}
 
 # 1. 平台检测
 detect_target() {
@@ -26,11 +37,15 @@ detect_target() {
 TARGET="$(detect_target)"
 info "目标平台: $TARGET"
 
+# 解析稳定版本号
+VERSION="$(resolve_stable_version)"
+[ -n "$VERSION" ] || { err "无法获取最新稳定版本"; exit 1; }
+info "稳定版本: $VERSION"
+
 # 2. 下载二进制与 tb 控制脚本
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 URL_BIN="https://github.com/$REPO/releases/download/$VERSION/tabbit-bridge-$TARGET.tar.gz"
-URL_TB="https://github.com/$REPO/releases/download/$VERSION/tb"
 
 info "下载二进制: $URL_BIN"
 curl -fsSL "$URL_BIN" -o "$TMP/bridge.tar.gz" || { err "下载二进制失败"; exit 1; }

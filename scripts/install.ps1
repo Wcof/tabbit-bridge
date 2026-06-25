@@ -5,8 +5,17 @@ tabbit-bridge 一键安装脚本（Windows）
 #>
 $ErrorActionPreference = 'Stop'
 
-$Repo = if ($env:REPO) { $env:REPO } else { 'tabbit/tabbit-bridge' }
-$Version = if ($env:VERSION) { $env:VERSION } else { 'latest' }
+$Repo = if ($env:REPO) { $env:REPO } else { 'Wcof/tabbit-bridge' }
+
+# 解析最新稳定版（GitHub API）
+function Resolve-StableVersion {
+    if ($env:VERSION -and $env:VERSION -ne 'latest') { return $env:VERSION }
+    $api = "https://api.github.com/repos/$Repo/releases/latest"
+    (Invoke-RestMethod -UseBasicParsing -Uri $api -Headers @{Accept='application/vnd.github+json'}).tag_name
+}
+$Version = Resolve-StableVersion
+Write-Host "[install] 稳定版本: $Version" -ForegroundColor Green
+
 $InstallDir = if ($env:PREFIX) { $env:PREFIX } else { Join-Path $env:LOCALAPPDATA 'tabbit-bridge' }
 
 # 1. 检测平台

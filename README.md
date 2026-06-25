@@ -365,7 +365,39 @@ kill $TB_PID 2>/dev/null
 rm -rf "$TB_DIR"
 ```
 
+## 自动更新
+
+| 命令 | 作用 |
+|---|---|
+| `tb check`   | 立即检查 GitHub Releases 最新稳定版 |
+| `tb upgrade` | 停服 → 下载 → SHA256 校验 → 原子替换 → 重启 → 健康检查 |
+
+服务启动时会异步检查一次（结果通过 `/healthz` 的 `update_available` 字段暴露）。
+
+### 配置（config.toml）
+
+```toml
+[update]
+check_on_start = true     # 启动时检查
+auto_install = false      # 默认手动；设 true 后台检查到新版自动升级
+channel = "stable"        # 仅支持 stable
+```
+
+### 安全保证
+
+- 只下载 `api.github.com/repos/<REPO>/releases/latest` 返回的稳定版（自动过滤 prerelease/draft）
+- 每个产物必须有 `.sha256` 旁文件，校验失败立即中止
+- 替换为原子 rename，失败自动回滚到 `.bak`
+- token 不会被更新覆盖（config.toml 与二进制分离）
+
 ## Changelog
+
+### v1.2.0（2026-06-26）
+- 新增 `tb check` / `tb upgrade` 自动更新命令
+- 新增 `--check-update` / `--self-update` 子命令
+- 安装脚本改用 GitHub API 解析最新稳定版（修复 latest tag 不可下载问题）
+- /healthz 暴露 update_available 字段
+- 原子替换 + SHA256 校验 + 自动回滚
 
 ### v1.1.2（2026-06-26）
 - 修复 install.ps1 路径反斜杠转义问题（Join-Path 重写）

@@ -11,9 +11,11 @@ use std::io::Read;
 use subtle::ConstantTimeEq;
 use tiny_http::{Header, Method, Response, Server};
 
+use crate::config;
 use crate::config::Config;
 use crate::exec::{self, ExecOutcome};
 use crate::registry;
+use crate::updater;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_BODY: u64 = 64 * 1024;
@@ -25,6 +27,7 @@ pub struct AppState {
     pub max_output: usize,
     pub rate_per_min: u32,
     pub bucket: Mutex<(Instant, u32)>,
+    pub update_available: Mutex<Option<String>>,
 }
 
 /// 简易线程池：N 个 worker 从 channel 取任务执行，慢命令不再阻塞 healthz。
@@ -58,7 +61,23 @@ pub fn serve(cfg: &Config) -> std::io::Result<()> {
         max_output: cfg.limits.max_output_bytes,
         rate_per_min: cfg.limits.rate_per_min,
         bucket: Mutex::new((Instant::now(), 0)),
+        update_available: Mutex::new(None),
     });
+
+    // 启动后台检查：仅查询并写入 config.toml + AppState，不自动安装
+    if cfg.update.check_on_start {
+        let state2 = state.clone();
+        thread::spawn(move || {
+            if let Ok(r) = updater::check_latest() {
+                if updater::is_newer(&r.version, updater::current_version()) {
+                    let _ = config::record_latest(&r.version);
+                    if let Ok(mut g) = state2.update_available.lock() {
+                        *g = Some(r.version);
+                    }
+                }
+            }
+        });
+    }
 
     let pool = spawn_worker_pool(4);
     for request in server.incoming_requests() {
@@ -79,7 +98,7 @@ fn handle_request(req: tiny_http::Request, state: &AppState) {
     }
     let path = req.url().to_string();
     match path.as_str() {
-        "/healthz" => handle_health(req),
+        "/healthz" => handle_health(req, &state),
         "/v1/exec" => {
             if !bearer_ok(&req, &state.token) {
                 send_json(req, 401, &serde_json::json!({"error":"unauthorized","code":401}));
@@ -139,8 +158,15 @@ fn handle_preflight(req: tiny_http::Request) {
     let _ = req.respond(resp);
 }
 
-fn handle_health(req: tiny_http::Request) {
-    let body = serde_json::json!({ "status": "ok", "version": VERSION });
+fn handle_health(req: tiny_http::Request, state: &AppState) {
+    let latest = state.update_available.lock().map(|g| g.clone()).unwrap_or(None);
+    let mut body = serde_json::json!({ "status": "ok", "version": VERSION });
+    if let Some(v) = latest {
+        body["update_available"] = serde_json::Value::Bool(true);
+        body["latest_known"] = serde_json::Value::String(v);
+    } else {
+        body["update_available"] = serde_json::Value::Bool(false);
+    }
     send_json(req, 200, &body);
 }
 

@@ -106,6 +106,40 @@ cmd_logs() {
     tail -n 50 -F "$LOG_OUT" "$LOG_ERR"
 }
 
+cmd_check() {
+    need_bin
+    out=$("$BIN" --check-update 2>&1) || { err "检查失败: $out"; exit 2; }
+    case "$out" in
+        update_available=*) info "发现新版本: ${out#update_available=}（运行 tb upgrade 升级）" ;;
+        up_to_date=*)       info "已是最新: ${out#up_to_date=}" ;;
+        *) warn "$out" ;;
+    esac
+}
+
+cmd_upgrade() {
+    need_bin
+    info "停止服务..."
+    cmd_stop || true
+    info "下载并替换二进制..."
+    if "$BIN" --self-update; then
+        info "重启服务..."
+        cmd_start
+        # 健康检查
+        sleep 1
+        PORT="$(awk -F'=' '/^port/ {gsub(/[ "]/,"",$2);print $2}' "$CFG")"
+        if curl -fsS -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
+            info "升级完成 ✓"
+        else
+            err "新版本健康检查失败，请查看日志或手动回滚 ${BIN}.bak"
+            exit 1
+        fi
+    else
+        err "升级失败，原二进制未变更"
+        cmd_start
+        exit 1
+    fi
+}
+
 cmd_uninstall() {
     warn "即将卸载 tabbit-bridge"
     printf "确认？[y/N] "
@@ -131,6 +165,8 @@ tb —— tabbit-bridge 控制器
   tb status        查看运行状态（PID/端口/内存）
   tb token         打印当前 token（填入妙招）
   tb logs          跟随日志
+  tb check         检查 GitHub 最新稳定版
+  tb upgrade       停服 → 下载 → 校验 → 替换 → 重启 → 健康检查
   tb uninstall     彻底卸载
   tb help          显示本帮助
 
@@ -146,6 +182,8 @@ case "${1:-help}" in
     status)    cmd_status ;;
     token)     cmd_token ;;
     logs)      cmd_logs ;;
+    check)     cmd_check ;;
+    upgrade)   cmd_upgrade ;;
     uninstall) cmd_uninstall ;;
     help|-h|--help) cmd_help ;;
     *) err "未知命令: $1"; cmd_help; exit 1 ;;
