@@ -3,8 +3,6 @@
 
 use std::fs;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use getrandom::getrandom;
@@ -103,7 +101,8 @@ fn random_high_port() -> u16 {
     40000 + (v % 20001)
 }
 
-/// 写文件并设置 0600 权限（Unix）。
+/// 原子创建并写入密钥文件。用 `create_new` 保证并发只有一个进程成功，
+/// 失败方会拿到 `AlreadyExists`，由调用方回退到读分支。
 fn write_secret(path: &Path, content: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -117,17 +116,20 @@ fn write_secret(path: &Path, content: &str) -> std::io::Result<()> {
     }
     #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt;
         let mut f = fs::OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(0o600)
             .open(path)?;
         f.write_all(content.as_bytes())?;
     }
     #[cfg(not(unix))]
     {
-        let mut f = fs::File::create(path)?;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
         f.write_all(content.as_bytes())?;
     }
     Ok(())
@@ -162,7 +164,8 @@ pub fn load_or_init() -> std::io::Result<(Config, PathBuf)> {
         return Ok((cfg, path));
     }
 
-    // 自举
+    // 自举：用 create_new 原子创建，并发时只有一个进程成功。
+    // 失败方（拿到 AlreadyExists）回退到读分支，加载对方刚写好的配置。
     let cfg = Config {
         server: ServerCfg {
             bind: "127.0.0.1".to_string(),
@@ -174,11 +177,34 @@ pub fn load_or_init() -> std::io::Result<(Config, PathBuf)> {
     let text = toml::to_string(&cfg).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("序列化配置失败: {}", e))
     })?;
-    write_secret(&path, &text)?;
-    // 日志仅记录端口与配置路径，绝不记录 token。
-    eprintln!("[tabbit-bridge] 首次启动，已生成配置: {}", path.display());
-    eprintln!("[tabbit-bridge] 监听端口: {}", cfg.server.port);
-    Ok((cfg, path))
+    match write_secret(&path, &text) {
+        Ok(()) => {
+            eprintln!("[tabbit-bridge] 首次启动，已生成配置: {}", path.display());
+            eprintln!("[tabbit-bridge] 监听端口: {}", cfg.server.port);
+            Ok((cfg, path))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // 并发自举：另一进程已抢先创建，回退读分支
+            let text = fs::read_to_string(&path)?;
+            let cfg: Config = toml::from_str(&text).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, format!("config.toml 解析失败: {}", e))
+            })?;
+            if cfg.server.token.len() != TOKEN_BYTES * 2 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "config.toml 中 token 长度非法，应为 64 个 hex 字符",
+                ));
+            }
+            if cfg.server.bind != "127.0.0.1" {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "安全约束：server.bind 必须为 127.0.0.1",
+                ));
+            }
+            Ok((cfg, path))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]

@@ -53,7 +53,7 @@ pub fn install() -> std::io::Result<()> {
     let cfg_dir = config::config_dir()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "无配置目录"))?;
     fs::create_dir_all(&cfg_dir)?;
-    let cfg_path = cfg_dir.join("config.toml").display().to_string();
+    let cfg_dir_str = cfg_dir.display().to_string();
     let log_out = cfg_dir.join("tabbit-bridge.out.log").display().to_string();
     let log_err = cfg_dir.join("tabbit-bridge.err.log").display().to_string();
     let xml = format!(
@@ -66,7 +66,7 @@ pub fn install() -> std::io::Result<()> {
     <array>
         <string>{exe_str}</string>
         <string>--config-dir</string>
-        <string>{cfg_path}</string>
+        <string>{cfg_dir_str}</string>
     </array>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
@@ -167,14 +167,14 @@ pub fn install() -> std::io::Result<()> {
     let exe_str = exe.display();
     let cfg_dir = config::config_dir()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "无配置目录"))?;
-    let cfg_path = cfg_dir.join("config.toml").display().to_string();
+    let cfg_dir_str = cfg_dir.display().to_string();
     let unit_text = format!(
         "[Unit]
 Description=Tabbit Bridge
 After=network.target
 
 [Service]
-ExecStart={exe_str} --config-dir {cfg_path}
+ExecStart={exe_str} --config-dir {cfg_dir_str}
 Restart=on-failure
 
 [Install]
