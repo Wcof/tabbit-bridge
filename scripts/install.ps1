@@ -11,7 +11,8 @@ $Repo = if ($env:REPO) { $env:REPO } else { 'Wcof/tabbit-bridge' }
 function Resolve-StableVersion {
     if ($env:VERSION -and $env:VERSION -ne 'latest') { return $env:VERSION }
     $api = "https://api.github.com/repos/$Repo/releases/latest"
-    (Invoke-RestMethod -UseBasicParsing -Uri $api -Headers @{Accept='application/vnd.github+json'}).tag_name
+    $Headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='tabbit-bridge-installer' }
+    (Invoke-RestMethod -UseBasicParsing -Uri $api -Headers $Headers).tag_name
 }
 $Version = Resolve-StableVersion
 Write-Host "[install] 稳定版本: $Version" -ForegroundColor Green

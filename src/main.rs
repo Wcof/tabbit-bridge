@@ -41,36 +41,8 @@ fn main() {
         i += 1;
     }
 
-    if let Some(d) = config_dir_override {
-        // 仅设置 env，由 config::config_dir() 读取
-        std::env::set_var("TABBIT_BRIDGE_CONFIG_DIR", d);
-    }
-
-    let (cfg, _path) = match config::load_or_init() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[tabbit-bridge] 配置加载失败: {e}");
-            exit(1);
-        }
-    };
-
+    // --check-update 和 --self-update 不依赖配置，跳过 load_or_init 避免意外自举
     match mode {
-        Mode::Install => {
-            if let Err(e) = service::install() {
-                eprintln!("[tabbit-bridge] 安装守护失败: {e}");
-                exit(1);
-            }
-        }
-        Mode::Uninstall => {
-            if let Err(e) = service::uninstall() {
-                eprintln!("[tabbit-bridge] 注销守护失败: {e}");
-                exit(1);
-            }
-        }
-        Mode::PrintToken => {
-            // 仅向 stdout 输出，便于安装脚本捕获；不进日志。
-            println!("{}", cfg.server.token);
-        }
         Mode::CheckUpdate => {
             match updater::check_latest() {
                 Ok(r) if updater::is_newer(&r.version, updater::current_version()) => {
@@ -120,6 +92,40 @@ fn main() {
                 exit(1);
             }
             println!("updated_to={}", r.version);
+            return;
+        }
+        _ => {}
+    }
+
+    if let Some(d) = config_dir_override {
+        // 仅设置 env，由 config::config_dir() 读取
+        std::env::set_var("TABBIT_BRIDGE_CONFIG_DIR", d);
+    }
+
+    let (cfg, _path) = match config::load_or_init() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[tabbit-bridge] 配置加载失败: {e}");
+            exit(1);
+        }
+    };
+
+    match mode {
+        Mode::Install => {
+            if let Err(e) = service::install() {
+                eprintln!("[tabbit-bridge] 安装守护失败: {e}");
+                exit(1);
+            }
+        }
+        Mode::Uninstall => {
+            if let Err(e) = service::uninstall() {
+                eprintln!("[tabbit-bridge] 注销守护失败: {e}");
+                exit(1);
+            }
+        }
+        Mode::PrintToken => {
+            // 仅向 stdout 输出，便于安装脚本捕获；不进日志。
+            println!("{}", cfg.server.token);
         }
         Mode::Run => {
             if let Err(e) = server::serve(&cfg) {
@@ -127,6 +133,7 @@ fn main() {
                 exit(1);
             }
         }
+        Mode::CheckUpdate | Mode::SelfUpdate => unreachable!(), // 已在上方提前返回
     }
 }
 

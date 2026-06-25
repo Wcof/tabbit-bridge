@@ -379,7 +379,7 @@ rm -rf "$TB_DIR"
 ```toml
 [update]
 check_on_start = true     # 启动时检查
-auto_install = false      # 默认手动；设 true 后台检查到新版自动升级
+auto_install = false      # v1.2.0 仅检查提示，自动安装预留（设 true 当前等同 false）
 channel = "stable"        # 仅支持 stable
 ```
 

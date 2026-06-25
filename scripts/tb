@@ -130,7 +130,13 @@ cmd_upgrade() {
         if curl -fsS -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
             info "升级完成 ✓"
         else
-            err "新版本健康检查失败，请查看日志或手动回滚 ${BIN}.bak"
+            err "新版本健康检查失败，自动回滚..."
+            if [ -f "${BIN}.bak" ]; then
+                mv -f "${BIN}.bak" "$BIN"
+                info "已回滚到旧版本"
+            fi
+            cmd_start
+            err "升级失败，已恢复旧版本服务"
             exit 1
         fi
     else

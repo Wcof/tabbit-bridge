@@ -233,6 +233,9 @@ pub fn load_or_init() -> std::io::Result<(Config, PathBuf)> {
 
 /// 把后台检查到的最新版本号写回 config.toml 的 [update] 段。
 /// 失败静默（不影响主服务）。时间戳用系统 epoch 秒。
+///
+/// 已知风险：重写整张 config.toml，用户手工添加的未识别字段会丢失。
+/// 未来可用 toml_edit 改为保留式写入。
 pub fn record_latest(version: &str) -> std::io::Result<()> {
     let dir = config_dir().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "无法确定配置目录")

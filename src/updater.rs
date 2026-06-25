@@ -20,6 +20,8 @@ pub fn check_latest() -> std::io::Result<ReleaseInfo> {
             "-fsSL",
             "-H",
             "Accept: application/vnd.github+json",
+            "-H",
+            &format!("User-Agent: tabbit-bridge/{}", CURRENT),
             "--max-time",
             "10",
             &url,
@@ -134,20 +136,43 @@ fn verify_sha256(file: &Path, sha: &Path) -> std::io::Result<()> {
         ));
     }
     // 复用系统工具校验，避免引入 sha2 crate
-    let (tool, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
-        ("shasum", &["-a", "256"])
-    } else {
-        ("sha256sum", &[])
+    // macOS: shasum -a 256; Linux: sha256sum; Windows: certutil -hashfile SHA256
+    #[cfg(target_os = "macos")]
+    let got = {
+        let out = Command::new("shasum").args(["-a", "256"]).arg(file).output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "shasum 执行失败"));
+        }
+        String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or("").to_lowercase()
     };
-    let out = Command::new(tool).args(args).arg(file).output()?;
-    if !out.status.success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "sha256 工具执行失败",
-        ));
-    }
-    let got = String::from_utf8_lossy(&out.stdout);
-    let got = got.split_whitespace().next().unwrap_or("").to_lowercase();
+    #[cfg(target_os = "linux")]
+    let got = {
+        let out = Command::new("sha256sum").arg(file).output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "sha256sum 执行失败"));
+        }
+        String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or("").to_lowercase()
+    };
+    #[cfg(target_os = "windows")]
+    let got = {
+        // certutil -hashfile <file> SHA256 输出格式：
+        //   SHA256 hash of <file>:
+        //   <64-char-hex>
+        //   CertUtil: -hashfile command completed successfully.
+        let out = Command::new("certutil")
+            .args(["-hashfile", &file.to_string_lossy(), "SHA256"])
+            .output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "certutil 执行失败"));
+        }
+        // 取第二行（hash 值）
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        stdout.lines().nth(1).unwrap_or("").trim().to_lowercase()
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    let got = {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "当前平台无 SHA256 校验工具"));
+    };
     if got != expected {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,

@@ -46,6 +46,7 @@ info "稳定版本: $VERSION"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 URL_BIN="https://github.com/$REPO/releases/download/$VERSION/tabbit-bridge-$TARGET.tar.gz"
+URL_TB="https://github.com/$REPO/releases/download/$VERSION/tb"
 
 info "下载二进制: $URL_BIN"
 curl -fsSL "$URL_BIN" -o "$TMP/bridge.tar.gz" || { err "下载二进制失败"; exit 1; }
