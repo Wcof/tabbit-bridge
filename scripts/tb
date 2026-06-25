@@ -31,17 +31,29 @@ warn()  { printf "${C_YELLOW}[tb]${C_END} %s\n" "$*"; }
 err()   { printf "${C_RED}[tb]${C_END} %s\n" "$*" >&2; }
 
 need_bin() {
-    [ -x "$BIN" ] || { err "未找到 $BIN，请重新运行安装脚本"; exit 1; }
+    [ -x "$BIN" ] || { err "未找到 ${BIN}，请重新运行安装脚本"; exit 1; }
 }
 
 cmd_start() {
     need_bin
     if [ "$PLATFORM" = "macos" ]; then
         [ -f "$PLIST" ] || "$BIN" --install
-        launchctl load -w "$PLIST" 2>/dev/null || true
-        info "已启动（launchd: ${LABEL}）"
+        UID_NUM="$(id -u)"
+        DOMAIN="gui/${UID_NUM}"
+        TARGET="${DOMAIN}/${LABEL}"
+        # 幂等：先尝试 bootout（已加载则卸载）
+        launchctl bootout "${TARGET}" 2>/dev/null || true
+        # bootstrap 加载
+        if launchctl bootstrap "${DOMAIN}" "${PLIST}" 2>/dev/null; then
+            launchctl enable "${TARGET}" 2>/dev/null || true
+            info "已启动（launchd: ${LABEL}）"
+        else
+            warn "bootstrap 失败，尝试 legacy launchctl load"
+            launchctl load -w "${PLIST}" || { err "启动失败，请查看 tb logs"; exit 1; }
+            info "已启动（legacy launchd: ${LABEL}）"
+        fi
     else
-        systemctl --user enable --now "$UNIT"
+        systemctl --user enable --now "${UNIT}"
         info "已启动（systemd-user: ${UNIT}）"
     fi
     cmd_status
@@ -49,10 +61,13 @@ cmd_start() {
 
 cmd_stop() {
     if [ "$PLATFORM" = "macos" ]; then
-        launchctl unload -w "$PLIST" 2>/dev/null || true
+        UID_NUM="$(id -u)"
+        TARGET="gui/${UID_NUM}/${LABEL}"
+        launchctl bootout "${TARGET}" 2>/dev/null || \
+            launchctl unload -w "${PLIST}" 2>/dev/null || true
         info "已停止"
     else
-        systemctl --user stop "$UNIT" 2>/dev/null || true
+        systemctl --user stop "${UNIT}" 2>/dev/null || true
         info "已停止"
     fi
 }
@@ -98,9 +113,7 @@ cmd_uninstall() {
 
     cmd_stop || true
     if [ -x "$BIN" ]; then "$BIN" --uninstall || true; fi
-    # tb 控制器自身：优先按本次调用路径定位，回退默认安装位置
-    TB_SELF="${0:-$HOME/.local/bin/tb}"
-    [ "$TB_SELF" != "$BIN" ] && rm -f "$TB_SELF" 2>/dev/null || true
+    # tb 控制器自身：只删安装目录下的，不删源码路径（避免误删 scripts/tb）
     rm -f "$BIN" "$HOME/.local/bin/tb" 2>/dev/null || true
     rm -rf "$CFG_DIR"
     info "已卸载（配置、二进制、tb 控制器、守护进程均已清理）"

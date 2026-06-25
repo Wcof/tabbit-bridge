@@ -364,3 +364,10 @@ systemctl --user is-active tabbit-bridge         # 期望 inactive (已注销)
 kill $TB_PID 2>/dev/null
 rm -rf "$TB_DIR"
 ```
+
+## Changelog
+
+### v1.1.1（2026-06-25）
+- 修复 macOS Apple Silicon + macOS 11+ 上 `tb start` 报 `Load failed: 5: Input/output error` 的问题
+- 把 macOS 守护进程注册从已废弃的 `launchctl load/unload` 迁移到 `bootstrap/bootout` 新 API
+- 保留 legacy `load -w` 作为极老系统的 fallback
