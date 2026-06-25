@@ -115,9 +115,17 @@ pub fn install() -> std::io::Result<()> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "无配置目录"))?;
     let cfg_path = cfg_dir.join("config.toml").display().to_string();
     let unit_text = format!(
-        "[Unit]\nDescription=Tabbit Bridge\nAfter=network.target\n\n\
-[Service]\nExecStart={exe_str} --config-dir {cfg_path}\nRestart=on-failure\n\n\
-[Install]\nWantedBy=default.target\n"
+        "[Unit]
+Description=Tabbit Bridge
+After=network.target
+
+[Service]
+ExecStart={exe_str} --config-dir {cfg_path}
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+"
     );
     fs::write(&unit, unit_text)?;
     let s = Command::new("systemctl")

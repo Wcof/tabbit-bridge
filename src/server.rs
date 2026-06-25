@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use subtle::ConstantTimeEq;
-use tiny_http::{Header, Method, Response, Server, StatusCode};
+use tiny_http::{Header, Method, Response, Server};
 
 use crate::config::Config;
 use crate::exec::{self, ExecOutcome};
@@ -84,11 +84,7 @@ fn bearer_ok(req: &tiny_http::Request, expected: &str) -> bool {
     };
     let got = rest.trim().as_bytes();
     let want = expected.as_bytes();
-    if got.len() != want.len() {
-        let _ = got.ct_eq(&vec![0u8; got.len()][..]);
-        return false;
-    }
-    got.ct_eq(want).into()
+    got.len() == want.len() && bool::from(got.ct_eq(want))
 }
 
 /// 统一 CORS 头注入：所有响应都必须经过它，否则浏览器会拦截。
@@ -196,5 +192,4 @@ fn handle_exec(mut req: tiny_http::Request, state: &AppState) {
         200
     };
     send_json(req, status, &resp_body);
-    let _ = StatusCode::from(200); // 保留以避免未使用导入告警（如 lint 严格）
 }

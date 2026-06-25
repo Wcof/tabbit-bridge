@@ -1,6 +1,6 @@
 [package]
 name = "tabbit-bridge"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["Tabbit Bridge"]
 description = "Secure local HTTP bridge between Tabbit browser scripts and local CLI tools"
