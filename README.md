@@ -367,6 +367,15 @@ rm -rf "$TB_DIR"
 
 ## Changelog
 
+### v1.1.2（2026-06-26）
+- 修复 install.ps1 路径反斜杠转义问题（Join-Path 重写）
+- 修复 tb.sh 端口解析在 Linux 上失效
+- 修复 cc_daily_at 多一个 --since 参数的 Bug
+- server 引入 4 线程工作池，慢命令不再阻塞 /healthz
+- 新增请求体 64KB 上限、rate_per_min 限流（429）
+- 收紧 Host 头校验（必须带端口）
+- read_capped 缓冲 4KB → 16KB，降低 syscall
+
 ### v1.1.1（2026-06-25）
 - 修复 macOS Apple Silicon + macOS 11+ 上 `tb start` 报 `Load failed: 5: Input/output error` 的问题
 - 把 macOS 守护进程注册从已废弃的 `launchctl load/unload` 迁移到 `bootstrap/bootout` 新 API

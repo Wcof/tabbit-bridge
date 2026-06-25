@@ -2,8 +2,11 @@
 //! 处理顺序：Host 校验 → OPTIONS 预检短路 → Bearer 校验 → action 路由。
 //! 全程不把 token 或命令输出写入日志。
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+use std::io::Read;
 
 use subtle::ConstantTimeEq;
 use tiny_http::{Header, Method, Response, Server};
@@ -13,12 +16,32 @@ use crate::exec::{self, ExecOutcome};
 use crate::registry;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const MAX_BODY: u64 = 64 * 1024;
 
 pub struct AppState {
     pub port: u16,
     pub token: Arc<String>,
     pub timeout: Duration,
     pub max_output: usize,
+    pub rate_per_min: u32,
+    pub bucket: Mutex<(Instant, u32)>,
+}
+
+/// 简易线程池：N 个 worker 从 channel 取任务执行，慢命令不再阻塞 healthz。
+fn spawn_worker_pool(size: usize) -> mpsc::Sender<Box<dyn FnOnce() + Send + 'static>> {
+    let (tx, rx) = mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>();
+    let rx = Arc::new(Mutex::new(rx));
+    for _ in 0..size {
+        let rx = rx.clone();
+        thread::spawn(move || loop {
+            let job = { rx.lock().unwrap().recv() };
+            match job {
+                Ok(j) => j(),
+                Err(_) => break,
+            }
+        });
+    }
+    tx
 }
 
 pub fn serve(cfg: &Config) -> std::io::Result<()> {
@@ -33,31 +56,39 @@ pub fn serve(cfg: &Config) -> std::io::Result<()> {
         token: Arc::new(cfg.server.token.clone()),
         timeout: Duration::from_millis(cfg.limits.timeout_ms),
         max_output: cfg.limits.max_output_bytes,
+        rate_per_min: cfg.limits.rate_per_min,
+        bucket: Mutex::new((Instant::now(), 0)),
     });
 
+    let pool = spawn_worker_pool(4);
     for request in server.incoming_requests() {
-        if !host_is_valid(&request, state.port) {
-            send_json(request, 403, &serde_json::json!({"error":"invalid host","code":403}));
-            continue;
-        }
-        if request.method() == &Method::Options {
-            handle_preflight(request);
-            continue;
-        }
-        let path = request.url().to_string();
-        match path.as_str() {
-            "/healthz" => handle_health(request),
-            "/v1/exec" => {
-                if !bearer_ok(&request, &state.token) {
-                    send_json(request, 401, &serde_json::json!({"error":"unauthorized","code":401}));
-                    continue;
-                }
-                handle_exec(request, &state);
-            }
-            _ => send_json(request, 404, &serde_json::json!({"error":"not found","code":404})),
-        }
+        let state = state.clone();
+        let _ = pool.send(Box::new(move || handle_request(request, &state)));
     }
     Ok(())
+}
+
+fn handle_request(req: tiny_http::Request, state: &AppState) {
+    if !host_is_valid(&req, state.port) {
+        send_json(req, 403, &serde_json::json!({"error":"invalid host","code":403}));
+        return;
+    }
+    if req.method() == &Method::Options {
+        handle_preflight(req);
+        return;
+    }
+    let path = req.url().to_string();
+    match path.as_str() {
+        "/healthz" => handle_health(req),
+        "/v1/exec" => {
+            if !bearer_ok(&req, &state.token) {
+                send_json(req, 401, &serde_json::json!({"error":"unauthorized","code":401}));
+                return;
+            }
+            handle_exec(req, &state);
+        }
+        _ => send_json(req, 404, &serde_json::json!({"error":"not found","code":404})),
+    }
 }
 
 fn host_is_valid(req: &tiny_http::Request, port: u16) -> bool {
@@ -70,8 +101,7 @@ fn host_is_valid(req: &tiny_http::Request, port: u16) -> bool {
         format!("localhost:{port}"),
         format!("[::1]:{port}"),
     ];
-    let bare = ["127.0.0.1", "localhost", "[::1]"];
-    valid.iter().any(|v| *v == h) || bare.iter().any(|b| *b == h)
+    valid.iter().any(|v| *v == h)
 }
 
 fn bearer_ok(req: &tiny_http::Request, expected: &str) -> bool {
@@ -93,7 +123,7 @@ fn add_cors<R: std::io::Read>(resp: &mut Response<R>) {
     resp.add_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, OPTIONS"[..]).unwrap());
     resp.add_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Authorization, Content-Type"[..]).unwrap());
     resp.add_header(Header::from_bytes(&b"Access-Control-Allow-Private-Network"[..], &b"true"[..]).unwrap());
-    resp.add_header(Header::from_bytes(&b"Vary"[..], &b"Origin"[..]).unwrap());
+    resp.add_header(Header::from_bytes(&b"Vary"[..], &b"Origin, Access-Control-Request-Headers"[..]).unwrap());
 }
 
 fn send_json(req: tiny_http::Request, status: u16, body: &serde_json::Value) {
@@ -119,8 +149,24 @@ fn handle_exec(mut req: tiny_http::Request, state: &AppState) {
         send_json(req, 405, &serde_json::json!({"error":"method not allowed","code":405}));
         return;
     }
-    let mut body = Vec::with_capacity(4096);
-    if std::io::Read::read_to_end(req.as_reader(), &mut body).is_err() {
+    // 限流：60 秒窗口内最多 rate_per_min 次
+    {
+        let mut b = state.bucket.lock().unwrap();
+        let now = Instant::now();
+        if now.duration_since(b.0).as_secs() >= 60 {
+            *b = (now, 0);
+        }
+        if b.1 >= state.rate_per_min {
+            drop(b);
+            send_json(req, 429, &serde_json::json!({"error":"rate limited","code":429}));
+            return;
+        }
+        b.1 += 1;
+    }
+    // 请求体上限 64KB，防止恶意超大 body 触发 OOM
+    let mut limited = req.as_reader().take(MAX_BODY);
+    let mut body = Vec::with_capacity(1024);
+    if std::io::Read::read_to_end(&mut limited, &mut body).is_err() {
         send_json(req, 400, &serde_json::json!({"error":"bad request","code":400}));
         return;
     }

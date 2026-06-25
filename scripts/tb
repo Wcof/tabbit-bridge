@@ -100,9 +100,10 @@ cmd_token() {
 }
 
 cmd_logs() {
-    [ -f "$LOG_OUT" ] || { warn "暂无日志: $LOG_OUT"; exit 0; }
-    info "跟随日志（Ctrl+C 退出）: $LOG_OUT"
-    tail -n 50 -f "$LOG_OUT" "$LOG_ERR"
+    [ -f "$LOG_OUT" ] || : > "$LOG_OUT"
+    [ -f "$LOG_ERR" ] || : > "$LOG_ERR"
+    info "跟随日志（Ctrl+C 退出）"
+    tail -n 50 -F "$LOG_OUT" "$LOG_ERR"
 }
 
 cmd_uninstall() {

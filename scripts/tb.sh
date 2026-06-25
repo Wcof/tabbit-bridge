@@ -56,10 +56,12 @@ TOKEN="$("$BIN_DIR/tabbit-bridge" --print-token)" || { err "配置自举失败";
 "$BIN_DIR/tb" start >/dev/null
 
 # 6. 友好输出
-PORT="$(grep '^port' "$HOME/Library/Application Support/tabbit-bridge/config.toml" 2>/dev/null \
-        || grep '^port' "$HOME/.config/tabbit-bridge/config.toml" 2>/dev/null \
-        | awk '{print $3}' | tr -d ' "')"
-
+if [ "$(uname -s)" = "Darwin" ]; then
+    CFG="$HOME/Library/Application Support/tabbit-bridge/config.toml"
+else
+    CFG="$HOME/.config/tabbit-bridge/config.toml"
+fi
+PORT="$(awk -F'=' '/^port/ {gsub(/[ "]/,"",$2); print $2}' "$CFG" 2>/dev/null)"
 printf "\n${C_YELLOW}================ tabbit-bridge 已就绪 ================${C_END}\n"
 printf "  ✅ 监听: ${C_CYAN}http://127.0.0.1:%s${C_END}\n" "$PORT"
 printf "  ✅ TOKEN（填入 Tabbit 妙招）:\n     ${C_CYAN}%s${C_END}\n" "$TOKEN"

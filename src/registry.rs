@@ -44,8 +44,7 @@ pub fn resolve(id: &str) -> Option<Entry> {
         }),
         "cc_daily_at" => Some(Entry {
             program: "ccusage",
-            // 占位：实际执行时用 controlled 替换该 "--" 之后的位置
-            args: &["daily", "--json", "--since", "--"],
+            args: &["daily", "--json"],
             controlled: Some(("since", "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "--since")),
             parses_json: true,
         }),
@@ -87,25 +86,16 @@ pub fn matches_simple(pattern: &str, value: &str) -> bool {
 /// 受控参数通过 `controlled_value` 注入，作为独立 argv 元素。
 pub fn build_command(entry: &Entry, controlled_value: Option<&str>) -> Option<Command> {
     let mut cmd = Command::new(entry.program);
-    if let Some((field, regex, flag)) = entry.controlled {
+    for a in entry.args {
+        cmd.arg(a);
+    }
+    if let Some((_field, regex, flag)) = entry.controlled {
         let v = controlled_value?;
         if !matches_simple(regex, v) {
             return None;
         }
-        // 替换 args 中末尾的 "--" 占位为受控值
-        for a in entry.args {
-            if *a == "--" {
-                cmd.arg(flag);
-                cmd.arg(v);
-            } else {
-                cmd.arg(a);
-            }
-        }
-        let _ = field; // field 仅用于文档化，不参与构造
-    } else {
-        for a in entry.args {
-            cmd.arg(a);
-        }
+        cmd.arg(flag);
+        cmd.arg(v);
     }
     Some(cmd)
 }
@@ -135,5 +125,13 @@ mod tests {
         let entry = resolve("cc_daily_at").unwrap();
         let cmd = build_command(&entry, Some("not-a-date"));
         assert!(cmd.is_none(), "非法格式的受控参数应被拒绝");
+    }
+
+    #[test]
+    fn cc_daily_at_builds_single_since() {
+        let entry = resolve("cc_daily_at").unwrap();
+        let cmd = build_command(&entry, Some("2026-06-25")).unwrap();
+        let args: Vec<_> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        assert_eq!(args, vec!["daily", "--json", "--since", "2026-06-25"]);
     }
 }

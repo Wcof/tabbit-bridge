@@ -87,7 +87,7 @@ pub fn run(mut cmd: Command, timeout: Duration, max_output_bytes: usize) -> Exec
 
 /// 读取到 EOF 或达到上限为止；达到上限置 truncated=true 并停止。
 fn read_capped<R: Read>(r: &mut R, buf: &mut Vec<u8>, cap: usize, truncated: &mut bool) {
-    let mut tmp = [0u8; 4096];
+    let mut tmp = [0u8; 16384];
     loop {
         match r.read(&mut tmp) {
             Ok(0) => break,
