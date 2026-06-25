@@ -6,6 +6,49 @@
 
 ---
 
+## 一键安装
+
+一行命令完成下载、配置自举、守护注册、立即启动、打印 token：
+
+```bash
+curl -fsSL https://github.com/tabbit/tabbit-bridge/releases/latest/download/tb.sh | sh
+```
+
+安装完成后终端会打印监听端口与 TOKEN。把 `~/.local/bin` 加入 PATH 即可直接使用 `tb` 控制器：
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+> 自定义仓库或版本：`curl -fsSL .../tb.sh | REPO=你的/tabbit-bridge VERSION=v1.1.0 sh`
+
+---
+
+## `tb` 命令使用
+
+`tb` 是随安装一并下放到 `~/.local/bin/tb` 的轻量 shell 控制器，封装了对 launchd / systemd 的日常操作：
+
+| 命令 | 作用 |
+| :--- | :--- |
+| `tb start` | 启动服务（首次会自动注册守护进程） |
+| `tb stop` | 停止服务 |
+| `tb restart` | 重启服务 |
+| `tb status` | 查看运行状态（PID / �端口 / 内存） |
+| `tb token` | 打印当前 TOKEN（填入妙招脚本） |
+| `tb logs` | �跟随 out/err 日志 |
+| `tb uninstall` | 彻底卸载（守护进程 / 配置 / 二进制 / tb 软链全清） |
+| `tb help` | 显示帮助 |
+
+示例：
+
+```bash
+tb status        # [tb] 运行中 · PID=12345 · 端口=47113 · 内存=2.4 MB
+tb token         # a1b2c3...（64 字符 hex）
+tb logs          # �跟随日志，Ctrl+C 退出
+```
+
+---
+
 ## 信任模型与边界说明（务必先读）
 
 ⚠️ **本方案的安全前提是个人本机使用，不适合把含 token 的妙招公开分发。**

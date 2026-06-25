@@ -71,3 +71,5 @@ jobs:
             tabbit-bridge-${{ matrix.target }}.*
             scripts/install.sh
             scripts/install.ps1
+            scripts/tb.sh
+            scripts/tb

@@ -1,0 +1,138 @@
+#!/bin/sh
+# tb —— tabbit-bridge 控制器（macOS / Linux）
+# 用法: tb <start|stop|restart|status|token|logs|uninstall|help>
+set -eu
+
+APP="tabbit-bridge"
+LABEL="com.tabbit.bridge"
+BIN="${TB_BIN:-$HOME/.local/bin/$APP}"
+
+OS="$(uname -s)"
+case "$OS" in
+    Darwin) PLATFORM="macos" ;;
+    Linux)  PLATFORM="linux" ;;
+    *) echo "不支持的平台: $OS" >&2; exit 1 ;;
+esac
+
+if [ "$PLATFORM" = "macos" ]; then
+    CFG_DIR="$HOME/Library/Application Support/tabbit-bridge"
+    PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+else
+    CFG_DIR="$HOME/.config/tabbit-bridge"
+    UNIT="tabbit-bridge.service"
+fi
+CFG="$CFG_DIR/config.toml"
+LOG_OUT="$CFG_DIR/tabbit-bridge.out.log"
+LOG_ERR="$CFG_DIR/tabbit-bridge.err.log"
+
+C_GREEN='\033[32m'; C_YELLOW='\033[33m'; C_RED='\033[31m'; C_CYAN='\033[36m'; C_END='\033[0m'
+info()  { printf "${C_GREEN}[tb]${C_END} %s\n" "$*"; }
+warn()  { printf "${C_YELLOW}[tb]${C_END} %s\n" "$*"; }
+err()   { printf "${C_RED}[tb]${C_END} %s\n" "$*" >&2; }
+
+need_bin() {
+    [ -x "$BIN" ] || { err "未找到 $BIN，请重新运行安装脚本"; exit 1; }
+}
+
+cmd_start() {
+    need_bin
+    if [ "$PLATFORM" = "macos" ]; then
+        [ -f "$PLIST" ] || "$BIN" --install
+        launchctl load -w "$PLIST" 2>/dev/null || true
+        info "已启动（launchd: ${LABEL}）"
+    else
+        systemctl --user enable --now "$UNIT"
+        info "已启动（systemd-user: ${UNIT}）"
+    fi
+    cmd_status
+}
+
+cmd_stop() {
+    if [ "$PLATFORM" = "macos" ]; then
+        launchctl unload -w "$PLIST" 2>/dev/null || true
+        info "已停止"
+    else
+        systemctl --user stop "$UNIT" 2>/dev/null || true
+        info "已停止"
+    fi
+}
+
+cmd_restart() { cmd_stop; sleep 1; cmd_start; }
+
+cmd_status() {
+    if [ "$PLATFORM" = "macos" ]; then
+        line=$(launchctl list 2>/dev/null | grep "$LABEL" || true)
+        if [ -z "$line" ]; then
+            warn "未在运行"
+            return
+        fi
+        pid=$(echo "$line" | awk '{print $1}')
+        if [ "$pid" = "-" ]; then
+            warn "已加载但未运行（可能崩溃，查看 tb logs）"
+        else
+            port=$(grep '^port' "$CFG" 2>/dev/null | awk '{print $3}' | tr -d ' "')
+            rss=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1f MB", $1/1024}')
+            info "运行中 · PID=$pid · 端口=$port · 内存=$rss"
+        fi
+    else
+        systemctl --user status "$UNIT" --no-pager | head -5 || true
+    fi
+}
+
+cmd_token() {
+    need_bin
+    "$BIN" --print-token
+}
+
+cmd_logs() {
+    [ -f "$LOG_OUT" ] || { warn "暂无日志: $LOG_OUT"; exit 0; }
+    info "跟随日志（Ctrl+C 退出）: $LOG_OUT"
+    tail -n 50 -f "$LOG_OUT" "$LOG_ERR"
+}
+
+cmd_uninstall() {
+    warn "即将卸载 tabbit-bridge"
+    printf "确认？[y/N] "
+    read -r ans
+    [ "$ans" = "y" ] || [ "$ans" = "Y" ] || { info "已取消"; exit 0; }
+
+    cmd_stop || true
+    if [ -x "$BIN" ]; then "$BIN" --uninstall || true; fi
+    # tb 控制器自身：优先按本次调用路径定位，回退默认安装位置
+    TB_SELF="${0:-$HOME/.local/bin/tb}"
+    [ "$TB_SELF" != "$BIN" ] && rm -f "$TB_SELF" 2>/dev/null || true
+    rm -f "$BIN" "$HOME/.local/bin/tb" 2>/dev/null || true
+    rm -rf "$CFG_DIR"
+    info "已卸载（配置、二进制、tb 控制器、守护进程均已清理）"
+}
+
+cmd_help() {
+    cat <<EOF
+tb —— tabbit-bridge 控制器
+
+用法:
+  tb start         启动服务（开机自启已由守护进程负责）
+  tb stop          停止服务
+  tb restart       重启服务
+  tb status        查看运行状态（PID/端口/内存）
+  tb token         打印当前 token（填入妙招）
+  tb logs          跟随日志
+  tb uninstall     彻底卸载
+  tb help          显示本帮助
+
+配置: $CFG
+日志: $LOG_OUT
+EOF
+}
+
+case "${1:-help}" in
+    start)     cmd_start ;;
+    stop)      cmd_stop ;;
+    restart)   cmd_restart ;;
+    status)    cmd_status ;;
+    token)     cmd_token ;;
+    logs)      cmd_logs ;;
+    uninstall) cmd_uninstall ;;
+    help|-h|--help) cmd_help ;;
+    *) err "未知命令: $1"; cmd_help; exit 1 ;;
+esac
