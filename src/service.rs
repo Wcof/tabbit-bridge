@@ -152,45 +152,44 @@ pub fn uninstall() -> std::io::Result<()> {
 
 #[cfg(windows)]
 pub fn install() -> std::io::Result<()> {
+    use std::ffi::OsString;
     use windows_service::service::{
-        ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType,
-        ServiceState, ServiceType,
+        ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceType,
     };
-    use windows_service::service_manager::{ServiceAccess, ServiceManager};
+    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
-    let manager = ServiceManager::local_computer(None::<&str>)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!(" SCM: {e}")))?;
-    let scm = manager
-        .access(ServiceAccess::CONNECT | ServiceAccess::CREATE_SERVICE)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!(" SCM access: {e}")))?;
+    let manager_access = ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE;
+    let scm = ServiceManager::local_computer(None::<&str>, manager_access)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("SCM: {e}")))?;
+
     let exe = current_exe();
     let svc_info = ServiceInfo {
-        name: "tabbit-bridge".into(),
-        display_name: "Tabbit Bridge".into(),
-        service_type: ServiceType::OwnProcess,
+        name: OsString::from("tabbit-bridge"),
+        display_name: OsString::from("Tabbit Bridge"),
+        service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
         executable_path: exe,
-        launch_arguments: vec!["--service".into()],
+        launch_arguments: vec![OsString::from("--service")],
         dependencies: vec![],
-        description: None,
+        account_name: None,
+        account_password: None,
     };
-    scm.create_service(&svc_info, ServiceAccess::START)
+    let service = scm
+        .create_service(&svc_info, ServiceAccess::START)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("create: {e}")))?;
+    let _ = service.start::<&str>(&[]);
     eprintln!("[tabbit-bridge] 已注册 Windows 服务");
     Ok(())
 }
 
 #[cfg(windows)]
 pub fn uninstall() -> std::io::Result<()> {
-    use windows_service::service::{ServiceAccess, ServiceState};
-    use windows_service::service_manager::{ServiceAccess, ServiceManager};
+    use windows_service::service::ServiceAccess;
+    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
-    let manager = ServiceManager::local_computer(None::<&str>)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!(" SCM: {e}")))?;
-    let scm = manager
-        .access(ServiceAccess::CONNECT | ServiceAccess::DELETE)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!(" SCM access: {e}")))?;
+    let scm = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("SCM: {e}")))?;
     let svc = scm
         .open_service("tabbit-bridge", ServiceAccess::DELETE | ServiceAccess::STOP)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("open: {e}")))?;
