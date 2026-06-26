@@ -61,18 +61,21 @@ jobs:
       - name: Hash install scripts (unix)
         if: runner.os != 'Windows'
         run: |
-          shasum -a 256 scripts/install.sh > scripts/install.sh.sha256
-          shasum -a 256 scripts/install.ps1 > scripts/install.ps1.sha256
-          shasum -a 256 scripts/tb > scripts/tb.sha256
-          shasum -a 256 scripts/tb.sh > scripts/tb.sh.sha256
+          # 把脚本与对应 sha256 复制到根目录，避免 release 上文件名带 scripts/ 前缀
+          for f in install.sh install.ps1 tb tb.sh; do
+            cp "scripts/$f" "$f"
+            # sha256 文件内容用裸文件名，便于下载后 sha256sum -c 校验
+            (cd "$(dirname "$f")" && shasum -a 256 "$(basename "$f")") > "$f.sha256"
+          done
 
       - name: Hash install scripts (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           foreach ($f in @('install.sh','install.ps1','tb','tb.sh')) {
-            $h = (Get-FileHash "scripts/$f" -Algorithm SHA256).Hash
-            "$h  scripts/$f" | Out-File -Encoding ascii "scripts/$f.sha256"
+            Copy-Item "scripts/$f" "$f"
+            $h = (Get-FileHash "$f" -Algorithm SHA256).Hash
+            "$h  $f" | Out-File -Encoding ascii "$f.sha256"
           }
 
       - name: Upload to Release
@@ -82,11 +85,11 @@ jobs:
           make_latest: true
           files: |
             tabbit-bridge-${{ matrix.target }}.*
-            scripts/install.sh
-            scripts/install.sh.sha256
-            scripts/install.ps1
-            scripts/install.ps1.sha256
-            scripts/tb.sh
-            scripts/tb.sh.sha256
-            scripts/tb
-            scripts/tb.sha256
+            install.sh
+            install.sh.sha256
+            install.ps1
+            install.ps1.sha256
+            tb.sh
+            tb.sh.sha256
+            tb
+            tb.sha256
