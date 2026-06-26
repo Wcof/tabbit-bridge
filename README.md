@@ -145,19 +145,45 @@ rate_per_min = 60
 
 ---
 
-## 白名单
+## 白名单（v1.3.0）
 
-编译期静态映射，新增指令必须改代码重编译：
+编译期静态映射，新增指令必须改代码重编译。所有参数仍是 argv 独立元素，禁止字符串拼接 shell。
 
-| action | 程序 | 固定参数 | JSON 解析 |
-|--------|------|---------|----------|
-| `rtk_gain` | `rtk` | `gain --all --format json` | ✓ |
-| `rtk_discover` | `rtk` | `discover --all --since 7` | ✗ |
-| `cc_daily` | `ccusage` | `daily --json` | ✓ |
-| `cc_monthly` | `ccusage` | `monthly --json` | ✓ |
-| `cc_daily_at` | `ccusage` | `daily --json --since <date>` | ✓（受控参数，须匹配 `^\d{4}-\d{2}-\d{2}$`） |
+### RTK 分组
+基于 rtk-ai/rtk 官方文档，所有指令统一带 `--format json`。
 
-受控参数作为**独立 argv 元素**传入，格式不符直接拒绝，绝不拼接 shell 字符串。
+| action | 命令 | 受控参数 | JSON |
+|---|---|---|---|
+| `rtk_gain` | `rtk gain --all --format json` | — | ✓ |
+| `rtk_gain_daily` | `rtk gain --daily --format json` | — | ✓ |
+| `rtk_gain_history` | `rtk gain --history --format json` | — | ✓ |
+| `rtk_gain_graph` | `rtk gain --graph` | — | ✗（ASCII 文本） |
+| `rtk_discover` | `rtk discover --all --since 7 --format json` | — | ✓ |
+| `rtk_discover_at` | `rtk discover --all --format json --since <N>` | `days` 整数 1-90 | ✓ |
+| `rtk_session` | `rtk session --format json` | — | ✓ |
+| `rtk_version` | `rtk --version` | — | ✗（健康自检） |
+
+### ccusage 分组
+基于 ccusage/ccusage 官方文档，全部子命令支持 `--json`。
+
+| action | 命令 | 受控参数 | JSON |
+|---|---|---|---|
+| `cc_daily` / `cc_weekly` / `cc_monthly` | `ccusage {daily,weekly,monthly} --json` | — | ✓ |
+| `cc_session` | `ccusage session --json` | — | ✓ |
+| `cc_blocks` | `ccusage blocks --json`（Claude 5h 计费窗口） | — | ✓ |
+| `cc_no_cost_daily` | `ccusage daily --json --no-cost` | — | ✓（隐私模式） |
+| `cc_daily_at` | `ccusage daily --json --since <date>` | `since` YYYY-MM-DD | ✓ |
+| `cc_daily_range` | `ccusage daily --json --since <d1> --until <d2>` | `since` + `until` | ✓ |
+| `cc_claude_daily` | `ccusage claude daily --json` | — | ✓ |
+| `cc_codex_daily` | `ccusage codex daily --json` | — | ✓ |
+| `cc_gemini_daily` | `ccusage gemini daily --json` | — | ✓ |
+| `cc_copilot_daily` | `ccusage copilot daily --json` | — | ✓ |
+
+### 前置依赖
+- `rtk`：建议 `brew install rtk` 或 `cargo install --git https://github.com/rtk-ai/rtk`
+- `ccusage`：建议 `npm i -g ccusage`（避免 `npx` 冷启动）；或在系统 PATH 中可直接调用 `ccusage`
+
+受控参数作为**独立 argv 元素**传入，格式不符直接拒绝（400），绝不拼接 shell 字符串。
 
 ---
 
@@ -391,6 +417,13 @@ channel = "stable"        # 仅支持 stable
 - token 不会被更新覆盖（config.toml 与二进制分离）
 
 ## Changelog
+
+### v1.3.0（2026-06-25）
+- 重写白名单：RTK 增至 8 个 action（覆盖 gain/discover/session 全部官方子命令，统一带 `--format json`）
+- ccusage 增至 11 个 action（含 weekly/session/blocks/日期区间/分 source 报告/隐私模式）
+- 修复 `rtk_discover` 未带 `--format json` 导致 data 为 null 的问题
+- `Entry.controlled` 改为数组，支持多受控参数，新增 `cc_daily_range` 日期区间
+- 新增 `rtk_discover_at` 天数受控参数（1-90 整数校验）
 
 ### v1.2.0（2026-06-26）
 - 新增 `tb check` / `tb upgrade` 自动更新命令

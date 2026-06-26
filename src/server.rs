@@ -210,13 +210,7 @@ fn handle_exec(mut req: tiny_http::Request, state: &AppState) {
         return;
     };
 
-    let controlled_value = if let Some((field, _regex, _flag)) = entry.controlled {
-        parsed.get(field).and_then(|v| v.as_str())
-    } else {
-        None
-    };
-
-    let Some(cmd) = registry::build_command(&entry, controlled_value) else {
+    let Some(cmd) = registry::build_command(&entry, &parsed) else {
         send_json(req, 400, &serde_json::json!({"error":"controlled parameter invalid","code":400}));
         return;
     };
