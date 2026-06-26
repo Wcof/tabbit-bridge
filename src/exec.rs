@@ -31,11 +31,13 @@ pub fn run(mut cmd: Command, timeout: Duration, max_output_bytes: usize) -> Exec
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(_) => {
+        Err(e) => {
+            // 暴露真实 io error（ENOENT / 权限等），便于排查 spawn 失败原因
+            let msg = format!("failed to spawn: {} (kind: {:?})", e, e.kind());
             return ExecOutcome {
                 exit_code: None,
                 stdout: Vec::new(),
-                stderr: b"failed to spawn".to_vec(),
+                stderr: msg.into_bytes(),
                 duration_ms: start.elapsed().as_millis() as u64,
                 truncated: false,
                 timed_out: false,

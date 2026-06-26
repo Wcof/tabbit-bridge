@@ -28,6 +28,7 @@ pub struct AppState {
     pub rate_per_min: u32,
     pub bucket: Mutex<(Instant, u32)>,
     pub update_available: Mutex<Option<String>>,
+    pub tools: config::ToolsCfg,
 }
 
 /// 简易线程池：N 个 worker 从 channel 取任务执行，慢命令不再阻塞 healthz。
@@ -62,6 +63,7 @@ pub fn serve(cfg: &Config) -> std::io::Result<()> {
         rate_per_min: cfg.limits.rate_per_min,
         bucket: Mutex::new((Instant::now(), 0)),
         update_available: Mutex::new(None),
+        tools: cfg.tools.clone(),
     });
 
     // 启动后台检查：仅查询并写入 config.toml + AppState，不自动安装
@@ -281,7 +283,7 @@ fn handle_exec(mut req: tiny_http::Request, state: &AppState) {
         return;
     };
 
-    let Some(cmd) = registry::build_command(&entry, &parsed) else {
+    let Some(cmd) = registry::build_command(&entry, &parsed, &state.tools) else {
         send_json(req, 400, &serde_json::json!({"error":"controlled parameter invalid","code":400}));
         return;
     };

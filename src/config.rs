@@ -17,6 +17,10 @@ pub struct Config {
     pub limits: LimitsCfg,
     #[serde(default)]
     pub update: UpdateCfg,
+    /// CLI 工具路径覆盖。非空时用绝对路径替换 program 名，
+    /// 兜底 volta/nvm 等版本化路径找不到的问题。
+    #[serde(default)]
+    pub tools: ToolsCfg,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +79,18 @@ fn default_check_on_start() -> bool {
 }
 fn default_channel() -> String {
     "stable".to_string()
+}
+
+/// CLI 工具路径覆盖。空字符串表示用 PATH 查找。
+/// 兜底 volta/nvm 等版本化路径找不到的问题。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolsCfg {
+    /// rtk 绝对路径，例如 "/Users/ldh/.local/bin/rtk"。空则用 PATH。
+    #[serde(default)]
+    pub rtk_path: String,
+    /// ccusage 绝对路径，例如 "/Users/ldh/.volta/bin/ccusage"。空则用 PATH。
+    #[serde(default)]
+    pub ccusage_path: String,
 }
 
 /// 返回当前平台的配置目录（不创建）。
@@ -197,6 +213,7 @@ pub fn load_or_init() -> std::io::Result<(Config, PathBuf)> {
         },
         limits: LimitsCfg::default(),
         update: UpdateCfg::default(),
+        tools: ToolsCfg::default(),
     };
     let text = toml::to_string(&cfg).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("序列化配置失败: {}", e))

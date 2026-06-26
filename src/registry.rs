@@ -135,8 +135,21 @@ pub fn matches_simple(pattern: &str, value: &str) -> bool {
 /// 受控参数从 `params` JSON 中按 `entry.controlled` 顺序提取，
 /// 经正则校验后作为独立 argv 元素追加（flag 与值各自独立 arg）。
 /// 任一受控参数缺失或格式不符，返回 None（调用方返回 400）。
-pub fn build_command(entry: &Entry, params: &serde_json::Value) -> Option<Command> {
-    let mut cmd = Command::new(entry.program);
+///
+/// `tools` 提供可选的绝对路径覆盖：非空时替换 entry.program，
+/// 兜底 volta/nvm 等版本化路径找不到的问题。
+/// 同时统一注入增强后的 PATH，解决 launchd/systemd 极简 PATH 导致 rtk/ccusage 找不到。
+pub fn build_command(
+    entry: &Entry,
+    params: &serde_json::Value,
+    tools: &crate::config::ToolsCfg,
+) -> Option<Command> {
+    let program = match entry.program {
+        "rtk" if !tools.rtk_path.is_empty() => tools.rtk_path.as_str(),
+        "ccusage" if !tools.ccusage_path.is_empty() => tools.ccusage_path.as_str(),
+        other => other,
+    };
+    let mut cmd = Command::new(program);
     for a in entry.args {
         cmd.arg(a);
     }
@@ -148,12 +161,43 @@ pub fn build_command(entry: &Entry, params: &serde_json::Value) -> Option<Comman
         cmd.arg(flag);
         cmd.arg(v);
     }
+    // 补齐 PATH，覆盖 launchd/systemd 极简 PATH（通常只有 /usr/bin:/bin）
+    cmd.env("PATH", augmented_path());
     Some(cmd)
+}
+
+/// 把常见用户级 bin 目录并入现有 PATH（去重保序），覆盖 launchd 极简 PATH。
+fn augmented_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut dirs: Vec<String> = vec![
+        format!("{home}/.local/bin"),   // rtk 实际所在
+        "/opt/homebrew/bin".into(),     // Apple Silicon brew
+        "/usr/local/bin".into(),        // Intel brew / npm 全局
+        format!("{home}/.volta/bin"),   // volta（若用它装 node/ccusage）
+        format!("{home}/.npm-global/bin"),
+        format!("{home}/.cargo/bin"),
+        "/usr/bin".into(),
+        "/bin".into(),
+    ];
+    if let Ok(cur) = std::env::var("PATH") {
+        for p in cur.split(':') {
+            if !p.is_empty() {
+                dirs.push(p.to_string());
+            }
+        }
+    }
+    // 去重保序
+    let mut seen = std::collections::HashSet::new();
+    dirs.into_iter()
+        .filter(|d| seen.insert(d.clone()))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ToolsCfg;
 
     #[test]
     fn all_actions_resolve() {
@@ -213,7 +257,7 @@ mod tests {
     fn cc_daily_at_builds_single_since() {
         let entry = resolve("cc_daily_at").unwrap();
         let p = serde_json::json!({"since": "2026-06-25"});
-        let cmd = build_command(&entry, &p).unwrap();
+        let cmd = build_command(&entry, &p, &ToolsCfg::default()).unwrap();
         let args: Vec<_> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
         assert_eq!(args, vec!["daily", "--json", "--since", "2026-06-25"]);
     }
@@ -222,17 +266,17 @@ mod tests {
     fn cc_daily_at_rejects_bad_format() {
         let entry = resolve("cc_daily_at").unwrap();
         let p = serde_json::json!({"since": "not-a-date"});
-        assert!(build_command(&entry, &p).is_none());
+        assert!(build_command(&entry, &p, &ToolsCfg::default()).is_none());
         // 缺字段
         let p = serde_json::json!({});
-        assert!(build_command(&entry, &p).is_none());
+        assert!(build_command(&entry, &p, &ToolsCfg::default()).is_none());
     }
 
     #[test]
     fn cc_daily_range_two_params() {
         let entry = resolve("cc_daily_range").unwrap();
         let p = serde_json::json!({"since": "2026-01-01", "until": "2026-06-25"});
-        let cmd = build_command(&entry, &p).unwrap();
+        let cmd = build_command(&entry, &p, &ToolsCfg::default()).unwrap();
         let args: Vec<_> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
         assert_eq!(
             args,
@@ -245,30 +289,30 @@ mod tests {
         let entry = resolve("cc_daily_range").unwrap();
         // 缺 until
         let p = serde_json::json!({"since": "2026-01-01"});
-        assert!(build_command(&entry, &p).is_none());
+        assert!(build_command(&entry, &p, &ToolsCfg::default()).is_none());
         // until 格式错
         let p = serde_json::json!({"since": "2026-01-01", "until": "bad"});
-        assert!(build_command(&entry, &p).is_none());
+        assert!(build_command(&entry, &p, &ToolsCfg::default()).is_none());
         // 注入尝试
         let p = serde_json::json!({"since": "2026-01-01", "until": "2026-06-25; rm -rf /"});
-        assert!(build_command(&entry, &p).is_none());
+        assert!(build_command(&entry, &p, &ToolsCfg::default()).is_none());
     }
 
     #[test]
     fn rtk_discover_at_days_validation() {
         let entry = resolve("rtk_discover_at").unwrap();
-        assert!(build_command(&entry, &serde_json::json!({"days": "7"})).is_some());
-        assert!(build_command(&entry, &serde_json::json!({"days": "90"})).is_some());
-        assert!(build_command(&entry, &serde_json::json!({"days": "0"})).is_none());
-        assert!(build_command(&entry, &serde_json::json!({"days": "91"})).is_none());
-        assert!(build_command(&entry, &serde_json::json!({"days": "7; rm -rf /"})).is_none());
+        assert!(build_command(&entry, &serde_json::json!({"days": "7"}), &ToolsCfg::default()).is_some());
+        assert!(build_command(&entry, &serde_json::json!({"days": "90"}), &ToolsCfg::default()).is_some());
+        assert!(build_command(&entry, &serde_json::json!({"days": "0"}), &ToolsCfg::default()).is_none());
+        assert!(build_command(&entry, &serde_json::json!({"days": "91"}), &ToolsCfg::default()).is_none());
+        assert!(build_command(&entry, &serde_json::json!({"days": "7; rm -rf /"}), &ToolsCfg::default()).is_none());
     }
 
     #[test]
     fn rtk_discover_at_builds_correct_order() {
         let entry = resolve("rtk_discover_at").unwrap();
         let p = serde_json::json!({"days": "30"});
-        let cmd = build_command(&entry, &p).unwrap();
+        let cmd = build_command(&entry, &p, &ToolsCfg::default()).unwrap();
         let args: Vec<_> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
         assert_eq!(
             args,
@@ -280,8 +324,42 @@ mod tests {
     fn non_controlled_action_ignores_params() {
         let entry = resolve("rtk_gain").unwrap();
         let p = serde_json::json!({"anything": "ignored"});
-        let cmd = build_command(&entry, &p).unwrap();
+        let cmd = build_command(&entry, &p, &ToolsCfg::default()).unwrap();
         let args: Vec<_> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
         assert_eq!(args, vec!["gain", "--all", "--format", "json"]);
+    }
+
+    #[test]
+    fn tools_path_overrides_program() {
+        // 非空 rtk_path 应替换 program；ccusage_path 同理
+        let entry = resolve("rtk_gain").unwrap();
+        let tools = ToolsCfg {
+            rtk_path: "/custom/rtk".to_string(),
+            ..Default::default()
+        };
+        let cmd = build_command(&entry, &serde_json::json!({}), &tools).unwrap();
+        assert_eq!(cmd.get_program(), "/custom/rtk");
+
+        let entry = resolve("cc_daily").unwrap();
+        let tools = ToolsCfg {
+            ccusage_path: "/custom/ccusage".to_string(),
+            ..Default::default()
+        };
+        let cmd = build_command(&entry, &serde_json::json!({}), &tools).unwrap();
+        assert_eq!(cmd.get_program(), "/custom/ccusage");
+    }
+
+    #[test]
+    fn build_command_injects_augmented_path() {
+        // PATH 应被注入且包含 ~/.local/bin
+        let entry = resolve("rtk_gain").unwrap();
+        let cmd = build_command(&entry, &serde_json::json!({}), &ToolsCfg::default()).unwrap();
+        let path = cmd
+            .get_envs()
+            .find(|(k, _)| k == &"PATH")
+            .and_then(|(_, v)| v)
+            .map(|os| os.to_string_lossy().to_string())
+            .unwrap_or_default();
+        assert!(path.contains(".local/bin"), "PATH 应含 ~/.local/bin: {path}");
     }
 }

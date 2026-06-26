@@ -6,16 +6,16 @@
 
 ---
 
-## 一键安装（macOS · 开发版 v1.3.2）
+## 一键安装（macOS · 开发版 v1.3.3）
 
 > 当前仅提供 macOS（Apple Silicon, `aarch64-apple-darwin`）构建。Linux/Windows 暂不支持。
 
 ### 方式 1 · 直接执行（一行式）
 
-复制下面**完整一行**到终端执行。注意 `v1.3.2` 中间**没有空格**：
+复制下面**完整一行**到终端执行。注意 `v1.3.3` 中间**没有空格**：
 
 ```bash
-curl -fsSL https://github.com/Wcof/tabbit-bridge/releases/download/v1.3.2/tb.sh | REPO=Wcof/tabbit-bridge VERSION=v1.3.2 sh
+curl -fsSL https://github.com/Wcof/tabbit-bridge/releases/download/v1.3.3/tb.sh | REPO=Wcof/tabbit-bridge VERSION=v1.3.3 sh
 ```
 
 ### 方式 2 · 先下载再执行（推荐，可校验）
@@ -25,10 +25,10 @@ curl -fsSL https://github.com/Wcof/tabbit-bridge/releases/download/v1.3.2/tb.sh 
 ```bash
 # 第 1 步：下载 tb.sh 到 /tmp
 curl -fsSL -o /tmp/tb.sh \
-  https://github.com/Wcof/tabbit-bridge/releases/download/v1.3.2/tb.sh
+  https://github.com/Wcof/tabbit-bridge/releases/download/v1.3.3/tb.sh
 
 # 第 2 步：执行（传入 REPO 与 VERSION 环境变量）
-REPO=Wcof/tabbit-bridge VERSION=v1.3.2 sh /tmp/tb.sh
+REPO=Wcof/tabbit-bridge VERSION=v1.3.3 sh /tmp/tb.sh
 ```
 
 脚本会完成：下载二进制 → SHA256 校验 → 自举生成随机端口与 token（`0600`）→ 注册 launchd 守护并立即启动 → 在终端打印端口与 TOKEN。
@@ -156,12 +156,26 @@ port = 47113                 # 安装时随机生成
 token = "..."                # 256-bit hex，权限 0600
 
 [limits]
-timeout_ms = 5000
+timeout_ms = 5000            # 默认超时；ccusage 自动放宽至 4 倍（20s）
 max_output_bytes = 2000000
 rate_per_min = 60
+
+[tools]
+# 可选：显式指定 CLI 绝对路径，兜底 volta/nvm 等版本化路径找不到的问题。
+# 留空则用 PATH 查找（build_command 已注入增强 PATH，含 ~/.local/bin、
+# /opt/homebrew/bin、/usr/local/bin、~/.volta/bin、~/.npm-global/bin、~/.cargo/bin）。
+rtk_path = ""                # 例如 "/Users/ldh/.local/bin/rtk"
+ccusage_path = ""            # 例如 "/Users/ldh/.volta/bin/ccusage"
+
+[update]
+check_on_start = true        # 启动时检查 GitHub Releases 最新稳定版
+auto_install = false         # 仅检查提示，自动安装预留
+channel = "stable"           # 仅支持 stable
 ```
 
 可用 `--config-dir <dir>` 覆盖配置目录（也支持环境变量 `TABBIT_BRIDGE_CONFIG_DIR`）。
+
+**排障提示**：若 `/v1/exec` 返回 `ok:false` 且 `stderr` 含 `failed to spawn: ... (kind: NotFound)`，说明 bridge 找不到 CLI。先用 `which rtk` / `which ccusage` 确认路径，再把绝对路径填入 `[tools]` 段，`tb restart` 后重试。launchd 启动的进程 PATH 极简，本服务已在 `build_command` 内统一注入增强 PATH，plist/systemd unit 也写死了 PATH，一般无需手工指定。
 
 ---
 

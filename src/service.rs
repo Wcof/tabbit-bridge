@@ -60,6 +60,11 @@ pub fn install() -> std::io::Result<()> {
     // rtk/ccusage 找 ./node_modules 之类相对路径行为不稳。
     let home_dir = std::env::var("HOME")
         .unwrap_or_else(|_| "/tmp".to_string());
+    // 写死 PATH，让 launchd 启动的进程能找到 rtk/ccusage（launchd 默认 PATH 极简）
+    let env_path = format!(
+        "{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:{home}/.volta/bin:{home}/.npm-global/bin:{home}/.cargo/bin:/usr/bin:/bin",
+        home = home_dir
+    );
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -73,6 +78,10 @@ pub fn install() -> std::io::Result<()> {
         <string>{cfg_dir_str}</string>
     </array>
     <key>WorkingDirectory</key><string>{home_dir}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>{env_path}</string>
+    </dict>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
     <key>StandardOutPath</key><string>{log_out}</string>
@@ -180,6 +189,7 @@ After=network.target
 
 [Service]
 ExecStart={exe_str} --config-dir {cfg_dir_str}
+Environment=PATH=%h/.local/bin:/usr/local/bin:%h/.volta/bin:%h/.npm-global/bin:%h/.cargo/bin:/usr/bin:/bin
 Restart=on-failure
 
 [Install]
