@@ -6,36 +6,107 @@
 
 ---
 
-## 一键安装
+## 一键安装（macOS · 开发版 v1.3.2）
 
-一行命令完成下载、配置自举、守护注册、立即启动、打印 token：
+> 当前仅提供 macOS（Apple Silicon, `aarch64-apple-darwin`）构建。Linux/Windows 暂不支持。
+
+### 方式 1 · 直接执行（一行式）
+
+复制下面**完整一行**到终端执行。注意 `v1.3.2` 中间**没有空格**：
 
 ```bash
-curl -fsSL https://github.com/tabbit/tabbit-bridge/releases/latest/download/tb.sh | sh
+curl -fsSL https://github.com/Wcof/tabbit-bridge/releases/download/v1.3.2/tb.sh | REPO=Wcof/tabbit-bridge VERSION=v1.3.2 sh
 ```
 
-安装完成后终端会打印监听端口与 TOKEN。把 `~/.local/bin` 加入 PATH 即可直接使用 `tb` 控制器：
+### 方式 2 · 先下载再执行（推荐，可校验）
+
+避免一行长命令在终端里被打错，分两步更稳妥：
+
+```bash
+# 第 1 步：下载 tb.sh 到 /tmp
+curl -fsSL -o /tmp/tb.sh \
+  https://github.com/Wcof/tabbit-bridge/releases/download/v1.3.2/tb.sh
+
+# 第 2 步：执行（传入 REPO 与 VERSION 环境变量）
+REPO=Wcof/tabbit-bridge VERSION=v1.3.2 sh /tmp/tb.sh
+```
+
+脚本会完成：下载二进制 → SHA256 校验 → 自举生成随机端口与 token（`0600`）→ 注册 launchd 守护并立即启动 → 在终端打印端口与 TOKEN。
+
+### 安装后：把 `~/.local/bin` 加入 PATH
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
-> 自定义仓库或版本：`curl -fsSL .../tb.sh | REPO=你的/tabbit-bridge VERSION=v1.1.0 sh`
+完成后即可使用 `tb` 控制器（见下文）。
+
+### 验收测试（装完后跑）
+
+```bash
+TOKEN=$(tb token)
+PORT=$(awk -F'=' '/^port/ {gsub(/[ "]/,"",$2);print $2}' \
+  "$HOME/Library/Application Support/tabbit-bridge/config.toml")
+
+# A. 健康检查
+curl -s "http://127.0.0.1:$PORT/healthz" -H "Host: 127.0.0.1:$PORT"; echo
+
+# B. 白名单 action（本机未装 rtk/ccusage 会 500，但绝不 404）
+for A in rtk_gain rtk_discover cc_daily cc_daily_range rtk_version; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Host: 127.0.0.1:$PORT" -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"action\":\"$A\"}" "http://127.0.0.1:$PORT/v1/exec")
+  echo "$A -> $code"
+done
+
+# C. 受控参数非法应 400
+curl -s -o /dev/null -w "rtk_discover_at days=999 -> %{http_code}\n" \
+  -H "Host: 127.0.0.1:$PORT" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"rtk_discover_at","days":"999"}' "http://127.0.0.1:$PORT/v1/exec"
+
+# D. rtk_gain_graph 已删除应 404
+curl -s -o /dev/null -w "rtk_gain_graph -> %{http_code}\n" \
+  -H "Host: 127.0.0.1:$PORT" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"rtk_gain_graph"}' "http://127.0.0.1:$PORT/v1/exec"
+
+# E. plist 含 WorkingDirectory（P3 修复）
+grep -A1 WorkingDirectory ~/Library/LaunchAgents/com.tabbit.bridge.plist
+
+# F. tb 控制器状态
+tb status
+```
+
+验收预期：
+
+| 测试 | 期望 | 验证点 |
+|---|---|---|
+| A healthz | 200 + JSON | 服务起来 |
+| B 五个 action | 200 或 500，绝不 404 | 白名单生效 |
+| C days=999 | 400 | 受控参数校验 |
+| D rtk_gain_graph | 404 | 已删除 |
+| E grep WorkingDirectory | 命中 `$HOME` | plist 修复 |
+| F tb status | 运行中 + 端口 | tb 控制器可用 |
 
 ---
 
 ## `tb` 命令使用
 
-`tb` 是随安装一并下放到 `~/.local/bin/tb` 的轻量 shell 控制器，封装了对 launchd / systemd 的日常操作：
+`tb` 是随安装一并下放到 `~/.local/bin/tb` 的轻量 shell 控制器，封装了对 launchd 的日常操作：
 
 | 命令 | 作用 |
 | :--- | :--- |
 | `tb start` | 启动服务（首次会自动注册守护进程） |
 | `tb stop` | 停止服务 |
 | `tb restart` | 重启服务 |
-| `tb status` | 查看运行状态（PID / �端口 / 内存） |
+| `tb status` | 查看运行状态（PID / 端口 / 内存） |
 | `tb token` | 打印当前 TOKEN（填入妙招脚本） |
-| `tb logs` | �跟随 out/err 日志 |
+| `tb logs` | 跟随 out/err 日志 |
+| `tb check` | 检查 GitHub 最新稳定版 |
+| `tb upgrade` | 停服 → 下载 → SHA256 校验 → 原子替换 → 重启 → 健康检查 |
 | `tb uninstall` | 彻底卸载（守护进程 / 配置 / 二进制 / tb 软链全清） |
 | `tb help` | 显示帮助 |
 
@@ -44,7 +115,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```bash
 tb status        # [tb] 运行中 · PID=12345 · 端口=47113 · 内存=2.4 MB
 tb token         # a1b2c3...（64 字符 hex）
-tb logs          # �跟随日志，Ctrl+C 退出
+tb logs          # 跟随日志，Ctrl+C 退出
 ```
 
 ---
@@ -66,25 +137,7 @@ tb logs          # �跟随日志，Ctrl+C 退出
 3. **防 DNS 重绑定 + CORS/PNA** — 校验 `Host` 头必须为 `127.0.0.1:<port>` / `localhost:<port>` / `[::1]:<port>`，否则 `403`；正确处理 `OPTIONS` 预检并返回 `Access-Control-Allow-Private-Network: true`，否则高版本 Chromium 会拦截 HTTPS 页面对本地接口的请求。
 4. **白名单 + 无 shell 执行** — 客户端只传 `action` 标识符；执行时用 `Command::new(prog).args(固定参数数组)`，**绝不使用 `sh -c` 或任何字符串拼接**，从根本上消灭命令注入。未命中白名单返回 `404`。
 
-工程兜底：每条命令施加超时（默认 5s）与输出上限（默认 2MB），超出截断并置 `truncated=true`；全程禁止 `unsafe`；token 与命令输出绝不写入日志。
-
----
-
-## 安装
-
-### macOS / Linux
-
-```bash
-curl -fsSL https://github.com/<your-release>/install.sh | sh
-```
-
-脚本会：检测平台下载二进制 → 自举生成随机端口与 token（`0600`）→ 注册后台守护并立即启动 → 在终端打印 token 供填入妙招。
-
-### Windows（管理员 PowerShell）
-
-```powershell
-iwr -useb https://github.com/<your-release>/install.ps1 | iex
-```
+工程兜底：每条命令施加超时（默认 5s，ccusage 自动放宽至 20s）与输出上限（默认 2MB），超出截断并置 `truncated=true`；全程禁止 `unsafe`；token 与命令输出绝不写入日志。
 
 ---
 
