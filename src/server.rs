@@ -158,6 +158,77 @@ fn handle_preflight(req: tiny_http::Request) {
     let _ = req.respond(resp);
 }
 
+/// 剥离 ANSI 颜色/控制序列（CSI ... m 与 OSC ... BEL/ST）。
+/// 仅用于 parses_json=false 的命令 stdout（如 rtk --version），让前端拿到干净文本。
+/// 实现走简易状态机，不引入 regex/strip-ansi-escapes crate。
+fn strip_ansi(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // ESC = 0x1B
+        if b == 0x1B {
+            // CSI: ESC [ ... 终止于 0x40..0x7E
+            if i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+                i += 2;
+                while i < bytes.len() && !(0x40..0x7E).contains(&bytes[i]) {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1; // 跳过终止字节
+                }
+                continue;
+            }
+            // OSC: ESC ] ... 终止于 BEL(0x07) 或 ST(ESC \)
+            if i + 1 < bytes.len() && bytes[i + 1] == b']' {
+                i += 2;
+                while i < bytes.len() {
+                    if bytes[i] == 0x07 {
+                        i += 1;
+                        break;
+                    }
+                    if bytes[i] == 0x1B && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            // 其他 ESC 序列：跳过 ESC 与下一字节
+            i += 2;
+            continue;
+        }
+        out.push(b);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_ansi_removes_csi_and_osc() {
+        // CSI 颜色码
+        let s = "\x1b[32mrtk 1.2.3\x1b[0m";
+        assert_eq!(strip_ansi(s), "rtk 1.2.3");
+        // OSC 标题（BEL 结束）
+        let s = "\x1b]0;title\x07rtk";
+        assert_eq!(strip_ansi(s), "rtk");
+        // OSC 标题（ST 结束）
+        let s = "\x1b]2;win\x1b\\rtk";
+        assert_eq!(strip_ansi(s), "rtk");
+        // 无 ANSI 的纯文本不变
+        assert_eq!(strip_ansi("plain text"), "plain text");
+        // 多段混合
+        let s = "\x1b[1;33mrtk\x1b[0m \x1b]0;t\x07v1\x1b[0m";
+        assert_eq!(strip_ansi(s), "rtk v1");
+    }
+}
+
 fn handle_health(req: tiny_http::Request, state: &AppState) {
     let latest = state.update_available.lock().map(|g| g.clone()).unwrap_or(None);
     let mut body = serde_json::json!({ "status": "ok", "version": VERSION });
@@ -215,7 +286,14 @@ fn handle_exec(mut req: tiny_http::Request, state: &AppState) {
         return;
     };
 
-    let outcome: ExecOutcome = exec::run(cmd, state.timeout, state.max_output);
+    // ccusage 冷启动 + 多 source 扫描较慢，放宽超时到 4 倍（默认 5s → 20s）。
+    // 仅对 program == "ccusage" 生效，其他命令保持原超时。
+    let timeout = if entry.program == "ccusage" {
+        Duration::from_millis(state.timeout.as_millis() as u64 * 4)
+    } else {
+        state.timeout
+    };
+    let outcome: ExecOutcome = exec::run(cmd, timeout, state.max_output);
     let mut stdout = outcome.stdout;
     let mut stderr = outcome.stderr;
     if outcome.truncated {
@@ -225,6 +303,13 @@ fn handle_exec(mut req: tiny_http::Request, state: &AppState) {
 
     let raw_str = String::from_utf8_lossy(&stdout).to_string();
     let stderr_str = String::from_utf8_lossy(&stderr).to_string();
+
+    // 对非 JSON 输出（如 rtk --version）剥离 ANSI 颜色/控制序列，避免前端 innerHTML 渲染乱码。
+    let raw_str = if entry.parses_json {
+        raw_str
+    } else {
+        strip_ansi(&raw_str)
+    };
 
     let data: serde_json::Value = if outcome.exit_code == Some(0) && entry.parses_json {
         serde_json::from_slice(&stdout).unwrap_or(serde_json::Value::Null)

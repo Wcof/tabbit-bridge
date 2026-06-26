@@ -56,6 +56,10 @@ pub fn install() -> std::io::Result<()> {
     let cfg_dir_str = cfg_dir.display().to_string();
     let log_out = cfg_dir.join("tabbit-bridge.out.log").display().to_string();
     let log_err = cfg_dir.join("tabbit-bridge.err.log").display().to_string();
+    // WorkingDirectory 设为 $HOME，避免 launchd 启动时 cwd 不确定导致
+    // rtk/ccusage 找 ./node_modules 之类相对路径行为不稳。
+    let home_dir = std::env::var("HOME")
+        .unwrap_or_else(|_| "/tmp".to_string());
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -68,6 +72,7 @@ pub fn install() -> std::io::Result<()> {
         <string>--config-dir</string>
         <string>{cfg_dir_str}</string>
     </array>
+    <key>WorkingDirectory</key><string>{home_dir}</string>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
     <key>StandardOutPath</key><string>{log_out}</string>

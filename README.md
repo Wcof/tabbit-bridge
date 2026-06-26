@@ -384,6 +384,36 @@ systemctl --user is-active tabbit-bridge         # 期望 inactive (已注销)
 #   无黑窗由 #![windows_subsystem="windows"] 保证。
 ```
 
+### 用例 9 · 端到端 JSON 解析（需本机已装 rtk / ccusage）
+
+registry 单测只比对 argv，本用例验证「在装了 rtk/ccusage 的机器上 stdout 能被 serde_json 解析」，即 `data` 不为 null。
+
+```bash
+# cc_daily：data 应为 JSON 数组或对象，而非 null
+curl -s -X POST "http://127.0.0.1:$PORT/v1/exec" \
+  -H "Host: 127.0.0.1:$PORT" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"cc_daily"}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('ok') is True, 'ok 应为 true'; assert d.get('data') is not None, 'data 不应为 null（说明 stdout 未被 JSON 解析）'; print('cc_daily OK, data type:', type(d['data']).__name__)"
+
+# rtk_gain：同样期望 data 非 null
+curl -s -X POST "http://127.0.0.1:$PORT/v1/exec" \
+  -H "Host: 127.0.0.1:$PORT" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"rtk_gain"}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('ok') is True; assert d.get('data') is not None; print('rtk_gain OK')"
+
+# rtk_version：parses_json=false，data 应为 null 但 raw 应为干净文本（无 ANSI 码）
+curl -s -X POST "http://127.0.0.1:$PORT/v1/exec" \
+  -H "Host: 127.0.0.1:$PORT" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"rtk_version"}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); raw=d.get('raw') or ''; assert '\x1b' not in raw, 'raw 不应含 ANSI 转义码'; print('rtk_version raw:', repr(raw))"
+```
+
 ### 清理
 
 ```bash

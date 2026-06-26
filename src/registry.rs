@@ -46,7 +46,6 @@ pub fn resolve(id: &str) -> Option<Entry> {
             &[],
             true,
         )),
-        "rtk_gain_graph" => Some(e("rtk", &["gain", "--graph"], &[], false)),
         "rtk_discover" => Some(e(
             "rtk",
             &["discover", "--all", "--since", "7", "--format", "json"],
@@ -162,7 +161,6 @@ mod tests {
             "rtk_gain",
             "rtk_gain_daily",
             "rtk_gain_history",
-            "rtk_gain_graph",
             "rtk_discover",
             "rtk_discover_at",
             "rtk_session",
@@ -184,6 +182,8 @@ mod tests {
         }
         assert!(resolve("rm_rf").is_none());
         assert!(resolve("").is_none());
+        // 已删除的 rtk_gain_graph 不应再可解析
+        assert!(resolve("rtk_gain_graph").is_none(), "rtk_gain_graph 应已删除");
     }
 
     #[test]

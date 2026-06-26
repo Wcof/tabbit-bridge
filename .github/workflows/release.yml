@@ -58,6 +58,23 @@ jobs:
           $hash = (Get-FileHash tabbit-bridge-${{ matrix.target }}.zip -Algorithm SHA256).Hash
           "$hash  tabbit-bridge-${{ matrix.target }}.zip" | Out-File -Encoding ascii tabbit-bridge-${{ matrix.target }}.zip.sha256
 
+      - name: Hash install scripts (unix)
+        if: runner.os != 'Windows'
+        run: |
+          shasum -a 256 scripts/install.sh > scripts/install.sh.sha256
+          shasum -a 256 scripts/install.ps1 > scripts/install.ps1.sha256
+          shasum -a 256 scripts/tb > scripts/tb.sha256
+          shasum -a 256 scripts/tb.sh > scripts/tb.sh.sha256
+
+      - name: Hash install scripts (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($f in @('install.sh','install.ps1','tb','tb.sh')) {
+            $h = (Get-FileHash "scripts/$f" -Algorithm SHA256).Hash
+            "$h  scripts/$f" | Out-File -Encoding ascii "scripts/$f.sha256"
+          }
+
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
@@ -66,6 +83,10 @@ jobs:
           files: |
             tabbit-bridge-${{ matrix.target }}.*
             scripts/install.sh
+            scripts/install.sh.sha256
             scripts/install.ps1
+            scripts/install.ps1.sha256
             scripts/tb.sh
+            scripts/tb.sh.sha256
             scripts/tb
+            scripts/tb.sha256

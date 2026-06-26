@@ -236,11 +236,17 @@ pub fn load_or_init() -> std::io::Result<(Config, PathBuf)> {
 ///
 /// 已知风险：重写整张 config.toml，用户手工添加的未识别字段会丢失。
 /// 未来可用 toml_edit 改为保留式写入。
+///
+/// 竞态缓解：写入前再次 stat 检查 mtime，若与读取时相比发生变化
+/// （说明用户正在手工编辑），放弃本次记录，避免覆盖用户改动。
 pub fn record_latest(version: &str) -> std::io::Result<()> {
     let dir = config_dir().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "无法确定配置目录")
     })?;
     let path = dir.join("config.toml");
+    // 记录读取时的 mtime；写入前若 mtime 变了则放弃，避免覆盖用户手工编辑。
+    let read_meta = fs::metadata(&path)?;
+    let mtime_before = read_meta.modified()?;
     let text = fs::read_to_string(&path)?;
     let mut cfg: Config = toml::from_str(&text).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("config.toml 解析失败: {}", e))
@@ -250,7 +256,13 @@ pub fn record_latest(version: &str) -> std::io::Result<()> {
     let new_text = toml::to_string(&cfg).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("序列化配置失败: {}", e))
     })?;
-    // 已有文件，普通覆写即可（自举竞争已由 create_new 解决）
+    // 写入前再次检查 mtime：若期间被外部改动则放弃本次记录
+    let mtime_after = fs::metadata(&path)?.modified()?;
+    if mtime_after != mtime_before {
+        // 静默放弃，不当作错误（后台线程无需感知）
+        eprintln!("[tabbit-bridge] config.toml 在记录期间被外部改动，放弃写入 last_known_version");
+        return Ok(());
+    }
     fs::write(&path, new_text)?;
     Ok(())
 }
